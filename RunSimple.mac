@@ -1,0 +1,5 @@
+/tracking/verbose 0
+/CustomCommands/det/setLightYield 108.9
+/CustomCommands/det/update
+/gun/energy 2000 MeV
+/run/beamOn 15000

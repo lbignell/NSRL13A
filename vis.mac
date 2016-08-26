@@ -1,0 +1,7 @@
+/vis/scene/create
+/vis/open OGLIX
+/tracking/storeTrajectory 1
+/vis/scene/add/trajectories
+#accumulate the events at end of each event, ie overlay trajectories
+/vis/scene/endOfEventAction accumulate
+/vis/viewer/set/viewpointThetaPhi 90 180.001

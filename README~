@@ -1,0 +1,262 @@
+7/9/14
+- Copied all over from NSRL13A simulation.
+- This simulation will be identical, except that it will implement the 2D matrix
+  of excitation/emission that was measured in Minfang's lab.
+  
+- There are a couple of ways that I can see this working; first I can just
+  modify the SensitiveDetector.cc file and add a function that will sample the
+  excitation/emission matrix. Note that this option involves a bit of juggling
+  to get the wavelength of the exciting photon. Alternatively I can make a 
+  custom implementation of G4OpWLS.cc, and instead of sampling the WLS spectrum
+  passed during the DetectorConstruction, sample the 2D excitation/emission
+  matrix. This method is more efficient, direct, and portable -- I'll do this.
+
+- Implementing the new G4OpWLS class as MyOpWLS. Adding method GetEmEnergy that
+  will take a double (the incident photon energy) and return a double (the
+  emitted photon energy).
+
+- The Em/Ex matrix data is currently stored as a .root file:
+    Tree Name = FluorSpec
+    Branch	Nentries	Type
+    Wavelength	21		vector<double>
+    Intensity	21		vector<double>
+    Lambda_ex	21		double
+
+- I need to search for Lambda_ex values that are above and below the true
+  exciting wavelength. If the vectors are the same size (they are), it should be
+  possible to just add these as a weighted contribution depending on the
+  difference between them and the exciting wavelength. Then I can just randomly
+  sample the (normalised) distribution. All of this will slow down the process,
+  hopefully not too much!
+  --> Note that this code is predicated on the assumption that the vectors
+      'wavelength' and 'intensity' are the same length. Ideally I should put
+      some code in to check or enforce this. *DONE* (return photon energy of
+      0 and output an error if the lengths aren't identical).
+
+- Everything seems to be working, except... For some reason when I try to grab a
+  pointer to the TBranch called 'Wavelength' a null pointer is returned!
+  - I don't have a problem getting other branches.
+  - Wierdly, if I use the same command in root to get the TBranch pointer, it
+    works with no problems!
+    --> I should probably look into precisely why this is happening, but for the
+    	moment I'll be satisfied with a workaround. 'Wavelength' is after all
+	predictable: Wavelength has 301 values, 300, 301, ... , 599, 600.
+
+- Fixed and mostly working, however I need to add some protection for limiting	
+  cases. In particular, if the exciting wavelength is > 450 nm, the 450 nm
+  spectrum should be sampled (as the 500 nm spectrum is all zeros anyway).
+  --> On second thoughts, I'd say this spectrum is of sufficiently low quality
+      as to justify simply returning the original wavelength (they're probably
+      equally wrong).
+
+- With Scintillation OFF, WLS ON; <#PE down> = 23.6, <#PE up> = 2 (2 GeV)
+- With Scintillation ON, WLS OFF; <#PE down> = 24.9, <#PE up> = 3 (2 GeV)
+
+7/10/14
+- Adjusted QY data to better reflect the measured fluorescence spectra (zero
+  below 211 nm, linearly extrapolate to DB data values after).
+- With Scintillation OFF, WLS ON; <#PE down> = 24, <#PE up> = 2.4 (2 GeV)
+- With Scintillation ON, WLS OFF; <#PE down> = 25, <#PE up> = 3   (2 GeV)
+- With Scintillation and WLS ON;  <#PE down> = 25, <#PE up> = 4.7 (2 GeV)
+  --> WTF? Why does # of PE detected downstream not increase once both are on?
+
+- Found bug in code: I was erroneously taking the wavelength-shifted photon's
+  energy as the test for the QY, whereas I should have taken the absorbed
+  photon's energy!
+  --> Now fixed, running again!
+  - Scint ON and WLS ON; <#PE down> = 26, <#PE up> = 4.3, (2 GeV)
+  - Scint ON and WLS ON; <#PE down> = 4.8, <#PE up> = 4.6, (475 MeV)
+  - Scint ON and WLS OFF; <#PE down> = 4.7, <#PE up> = 3.9, (475 MeV)
+  - Scint OFF and WLS OFF; <#PE down> = 1.3, <#PE up> = 1.0, (475 MeV)
+  - Scint OFF and WLS ON; <#PE down> = 1.2, <#PE up> = 1.1, (475 MeV)
+  - Scint OFF and WLS ON; <#PE down> = 22.7, <#PE up> = 1.7, (2 GeV)
+  - Scint OFF and WLS OFF; <#PE down> = 22, <#PE up> = 1.5, (2 GeV)
+
+- Did validation of Ex/Em WLS implementation using optical photons. It works :-)
+
+7/15/14
+- On David's suggestion, modifying the refractive index of water to see what
+  effect it has.
+  - Scint 100 ph/MeV and WLS ON; <#PE down> = 23.5, <#PE up> = 4.6
+
+11/11/14
+- Need to combine all of my modifications to the WLS process (exciting
+  wavelength-dependent QY and exciting wavelength-dependent emission) into the
+  MyOpWLS.cc class.
+  -> The Ex/Em matrix is already so-implemented, but it needs to be sped up by
+     pre-loading the data into memory.
+  -> The QY is currently implemented in the SensitiveDetector, I need to move
+     this over to the OpWLS physics class, which means I need to find out
+     exactly when the photons are generated.
+
+- Notes on how the Geant4 MaterialPropertiesTable works:
+  - Properties are registered via the method AddProperty("SOMENAME") (called in
+    the DetectorConstruction.
+  - Const properties are stored as double values.
+  - Array-type properties are stored as a MaterialPropertyVector (typedef of
+    a G4PhysicsFreeOrderedVector.
+
+
+ - The current OpWLS builds a table of cumulative distribution functions in a
+   variable called `theIntegralTable' (a G4PhysicsTable; which has a number of
+   entries equal to the number of materials in the simulation).
+   -> For each material in the simulation; the MaterialPropertyVector of
+      "WLSCOMPONENT" (if it exists) is gotten.
+   -> It then sets a PhysicsOrderedFreeVector with (energy, Integral) pairs.
+      -> Integral is calculated as:
+ 	  Integral = PrevIntegral + deltaE*0.5*(prevVal + currentVal),
+	 which I believe is an implementation of the trapezoidal rule.
+   -> The PhysicsFreeOrderedVector (CDF) is then inserted back into
+      theIntegralTable at the location of the material in the material in 
+      the MaterialTable.
+- I can do a similar thing with the quantum yield, I just need to
+  -> define a property in the MaterialPropertiesTable called "QUANTUMYIELD" to
+     the WbLS material properties table. This is done in DetectorConstruction.
+     ->Done.
+  -> Add a member to MyOpWLS to populate the wavelength-dependent QYs for the
+     simulation. This needs to be called by the PhysicsList. This member will
+     be largely identical to the existing member called BuildThePhysicsTable(),
+     except rather than calculating a CDF, it just grabs the material property.
+     -> Method called BuildTheQYTable(). Also made member theQYTable.
+  -> I also need to ensure that the BuildPhyiscsTable method calls this method.
+     The BuildPhysicsTable method is always called somewhere during
+     initialization of the physics list.
+     -> Done.
+  -> Use the cumulative distribution function table to Monte Carlo sample the
+     NumberOfSecondaries variable.
+     -> Done.
+
+- While the QY code appears to be done, it returns garbage results when I run it
+  and if I try to access the QY Mat Prop Vector during initialization the code
+  seg faults.
+  -> Added protection so that the materials with no QY set weren't accessed.
+
+14/11/12
+- I still have the problem of the code returning garbage results (always
+  1.55E-5).
+  -> The value that is returned just happens to be the value of the final energy
+     in the input array (in MeV). It appears that I'm getting the energy, rather
+     than the value...
+  -> So the problem is that the PhysicsOrderedFreeVector does not operate in the
+     way that I was thinking it was. I'm now setting the QY to the minimum value
+     if the energy is below the minimum energy, the maximum value if the energy
+     is above the maximum energy, otherwise I use the interpolated value via the
+     'Value(Energy)' method.
+
+14/11/16
+- I now need to implement the Ex/Em matrix more efficiently as a
+  PhysicsOrderedFreeVector. Of course, I need to figure out whether I one of
+  these can be implemented in 2D. As an alternative; I can add a method to my
+  OpWLS class that will load the data into memory as a vector that can be
+  accessed later.
+  -> I can make a private member of the MyOpWLS class to hold the Ex/Em data, 
+     and initialize this member when the MyOpWLS class is called in the the
+     PhysicsList.
+  -> To make it more general, I need to get the program to expect a formatted
+     text file (maybe just put this on the to-do list).
+
+14/11/18
+- I've implemented the Ex/Em matrix as a vector (member of MyOpWLS). It is
+  initialized from the user's physics list. The ROOT file name is provided as
+  an argument, however the names of the tree and branches that are read in are
+  hard-coded (I can change this later if/when I add functionality to read in a
+  text file instead).
+- I now need to do some calculations to validate this model...
+
+14-11-23
+- Made some fixes to the revised MyOpWLS model. The results are correct-ish,
+  however I need to modify the input data to reflect that used in my earlier
+  model to see that I get the same results.
+  -> Prelim simulation suggests that the photon yield is very close, however it
+     may need to be re-optimized. This may be a good opportunity to optimize
+     using the K-S test, rather than the mean.
+
+2015-01-22
+- I'm coming at this simulation again, this time I'm going to do a scan over the
+  light yields, using the kB value that I've found from the 2012 data to be
+  optimal (0.329 mm/MeV). For each light yield I can do a Chi2 test against the
+  measured data to find the optimal value.
+
+2015-01-23
+- Results of scan over simulation vs measurement at kB = 0,329. Note that I'm 
+  using the *average* PMT distribution for comparison.
+  Data: <#PE> = 4.7556
+  Sim, 101 ph/MeV = 4.4755, Chi2 = 168.5, NDF = 23, pVal = 4E-24
+  Sim, 102 ph/MeV = 
+  -> Actually; there was some sort of stuff-up in the script that I don't fully
+     understand that means the true simulated values appear to be: 98, 99, 100,
+     101, 104, 105, 106, 107, and 109 ph/MeV.
+     I don't really trust these results so I'm running again...
+
+2015-02-02
+- Ran from 100--120 ph/MeV, chi2 minimum appears to be at about 111 ph/MeV.
+  -> NB: The above run is for kB = 0.10 mm/MeV, which doesn't appear to be large
+     enough given the results I'm seeing in 12C.
+
+- Doing a light yield scan again, this time with kB = 0.29 mm/MeV (which for my
+  12C simulation gave a light yield of 103 ph/MeV).
+  -> It actually makes a decent difference depending on which PMT you use for
+     the data set you compare against. I've been using PMT A up until now. Using
+     PMT A gives an optimal light yield of 114.5 ph/MeV. Using PMT B gives 109
+     ph/MeV. About 5% difference! If the sum of A and B is used for the
+     comparison, the optimal value is 111.9 ph/MeV (about the average of the
+     optimal values for PMTs A and B).
+
+2015-02-25
+- Looking at 0.29 mmm/MeV data UPSTREAM; gives pretty good agreement at light
+  yield of 105 ph/MeV. 110 mm/MeV is certainly a bad fit (by eye).
+  UPSTREAM COMPARISION:
+  -> Fitting Chi2 vs LY (using Avgd dist) gives a minimum at ~105.6-106 ph/MeV.
+  -> Using PMTA only: minimum is 108.8 ph/MeV
+  -> Using PMTB only: minimum is ~100.5 - 102.7 ph/MeV depending on the limits.
+  DOWNSTREAM COMPARISON:
+  -> Fitting Chi2 vs LY (using Avgd dist) gives a minimum at ~109-109.5 ph/MeV.
+  -> Using PMTA only: minimum is ~115.5 ph/MeV!
+  -> Using PMTB only: minimum is ~104 ph/MeV.
+
+  -> It is comforting at least that whether you take the average before or after
+     the Chi2 calculation and fitting, the averaged results are quite similar.
+     BUT: what causes this discrepancy? If it's just the tube gain then why
+     isn't it just cancelled out by the single PE calib?
+     - This is a 5-10% level effect on the light yield. However, I think it is 
+       possible that although the experiment tried to ensure the repeated
+       upstream and downstream measurements were exactly the same, the optics 
+       just aren't exact enough. The single PE calibration may also contribute,
+       but this shouldn't be a systematic effect.
+
+2015-02-26
+- Looking at kB = 0.329 mm/MeV data:
+  - Avg Upstream: Optimal LY is at 106 ph/MeV.
+  - Avg Downstream: Optimal LY is at 110.5-111 ph/MeV.
+
+2015-02-26
+- The scintillator refractive index makes quite a big difference (at least to
+  the downstream detector).
+  - Avg Downstream (WbLS 1% Refractive Index) = 108.5 ph/MeV
+
+2015-03-20
+- Running 2 GeV on WbLS simulation, LY = 108 ph/MeV, kB = 0.329 mm/MeV.
+  I need this for validation of these parameters.
+  I also want to look at the effect of turning my WLS model on/off (so I can
+  compare the difference it makes in the paper).
+
+- The use of my model rather than an 'effective' quantum yield (integrated QY
+  weighted by the simulated emission spectrum from all processes) leads to ~3 PE
+  extra in both detectors.
+  It makes a 2.2 PE difference for 2 GeV protons on the 13A geometry.
+  (I've switched my model back on now...)
+  Actually; on closer inspection of the data, I've not updated the WLS spectrum
+  that Geant4 uses. I need to change 'WLSCOMPONENT' then turn G4WLS back on, and
+  run again...	   
+
+2015-03-24
+- After making the fix and running again; my model now only makes ~1 PE
+  difference, although this is still pretty significant if you consider that the
+  upstream detector only sees ~7 PE to start with!
+  upstream my model mean = 7.64
+  upstream G4 model mean = 6.40
+  G4 model predicts 21% fewer WLS photons than my model.
+
+2015-04-10
+- Turned my WLS model back on.
+- Generating plots for paper.

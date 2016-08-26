@@ -1,0 +1,20 @@
+/tracking/verbose 0
+
+#Finally I can do I-123
+/gun/energy 3.77 keV
+/run/beamOn 225000000
+
+/gun/energy 27.202 keV
+/run/beamOn 225000000
+
+/gun/energy 27.4726 keV
+/run/beamOn 225000000
+
+/gun/energy 31 keV
+/run/beamOn 225000000
+
+/gun/energy 158.97 keV
+/run/beamOn 225000000
+
+/gun/energy 528.96 keV
+/run/beamOn 225000000
